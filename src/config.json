@@ -1,12 +1,12 @@
-{
+ {
     "name": " SeiPenguins",
     "description": "Powered By Pengulabs",
     "website": "http://www.pengulabs.xyz/",
     "twitter": "https://twitter.com/SeiPenguins",
     "discord": "https://discord.gg/vxcgtsv9YE",
-    "rpc": "https://sei-rpc.brocha.in/",
-    "network": "pacific-1",
-    "collection_address": "sei16g5zrsk2gwstj8lyw697umxdht6hx4cmsks982f79p3j9wfqhszq5ue7hv",
+    "rpc": "https://sei-testnet-rpc.polkachu.com",
+    "network": "atlantic-2",
+    "collection_address": "sei188969vhz4qx0k5d6cdd9kw0rnxntajwg7mevukclqkavae90utrs0dvmx7",
     "nft_name_type": "default",
     "groups": [
     ]

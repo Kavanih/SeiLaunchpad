@@ -1,0 +1,1 @@
+   // "rpc": "https://sei-rpc.brocha.in/",

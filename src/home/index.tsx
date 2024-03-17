@@ -1,17 +1,25 @@
-import { useState, useEffect, useRef } from "react"
+import { useCallback, useState, useEffect, useRef } from "react"
 import * as C from "./style"
 import { useWalletConnect } from "hooks/walletConnect"
 import config from "config.json"
 import { Bg } from "styles/bg"
 import Wallet, { DropdownItem } from "components/wallet"
+// import cors from "cors";
+
+// iNTx 
 import { getSigningCosmWasmClient } from "@sei-js/core"
+import { useCosmWasmClient, useSigningCosmWasmClient, useWallet, WalletConnectButton } from '@sei-js/react';
+
+
 import { SigningCosmWasmClient } from "@cosmjs/cosmwasm-stargate"
+import { GasPrice } from "@cosmjs/stargate";
+
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome"
 import { faDiscord, faTwitter } from '@fortawesome/free-brands-svg-icons'
 import { faCircleNotch, faGlobe } from "@fortawesome/free-solid-svg-icons"
 import BigNumber from "bignumber.js"
 import { Timer } from "components/timer"
-import { GasPrice } from "@cosmjs/stargate";
+
 import { keccak_256 } from '@noble/hashes/sha3'
 import { MerkleTree } from 'merkletreejs';
 import { toast } from "react-hot-toast"
@@ -23,6 +31,8 @@ import axios from "axios"
 var phaseTimer: any = {}
 var interval: any = null
 var phaseSwitch = false
+
+const CONTRACT_ADDRESS = 'sei1lymek0rmgmgx4f4agmh6y5exrwr4zhtwczdruqc5cew5sagf0mwq5a2e79';
 
 const Home = () => {
 
@@ -51,7 +61,7 @@ const Home = () => {
 
         interval = setInterval(() => {
             refresh()
-        }, 5000)
+        }, 60000)
 
         return () => {
             clearInterval(interval)
@@ -65,12 +75,19 @@ const Home = () => {
 
     const refresh = async () => {
         const client = await SigningCosmWasmClient.connect(config.rpc)
-        client.queryContractSmart(LIGHTHOUSE_CONTRACT, { get_collection: { collection: config.collection_address } }).then((result) => {
+        client.queryContractSmart(CONTRACT_ADDRESS, { get_collection: { collection: config.collection_address } }).then((result) => {
             console.log(result)
             let collectionData: any = {
                 supply: result.supply,
                 mintedSupply: result.next_token_id,
-                phases: [],
+                phases: result.mint_groups.map((group: { name: any; merkle_root: any; max_tokens: any; unit_price: any; start_time: any; end_time: any }) => ({
+                    name: group.name,
+                    merkleRoot: group.merkle_root,
+                    maxTokens: group.max_tokens,
+                    unitPrice: group.unit_price,
+                    startTime: group.start_time,
+                    endTime: group.end_time,
+                })),
                 tokenUri: result.token_uri,
                 name: result.name,
             }
@@ -87,8 +104,12 @@ const Home = () => {
                     }
                 }
             }
+            
+            console.log(collectionData);
+            
 
             setCollection(collectionData)
+            // here too
             managePhases(collectionData.phases)
             setLoading(false)
             refreshMyMintedNfts()
@@ -106,28 +127,28 @@ const Home = () => {
         let balance = await client.getBalance(wallet!.accounts[0].address, "usei")
         setBalance(new BigNumber(balance.amount).div(1e6).toString())
 
-        client.queryContractSmart(LIGHTHOUSE_CONTRACT, { balance_of: { address: wallet!.accounts[0].address, collection: config.collection_address } }).then((result) => {
+        client.queryContractSmart(CONTRACT_ADDRESS, { balance_of: { address: wallet!.accounts[0].address, collection: config.collection_address } }).then((result) => {
             setMyMintedNfts(result.mints)
 
             client.disconnect()
         })
     }
-
+    
     const managePhases = (phases: any[]) => {
 
         let currentPhase = null
 
         for (let i = 0; i < phases.length; i++) {
             let phase = phases[i]
+            
+            phase.startTime *= 1
+            phase.endTime = phase.endTime === 0 ? 0 : phase.endTime * 1000
 
-            phase.start_time *= 1000
-            phase.end_time = phase.end_time === 0 ? 0 : phase.end_time * 1000
-
-            let start = new Date(phase.start_time)
-            let end = new Date(phase.end_time)
+            let start = new Date(phase.startTime)
+            let end = new Date(phase.endTime)
             let now = new Date()
 
-            if (phase.end_time === 0)
+            if (phase.endTime === 0)
                 end = new Date(32503680000000)
 
             if (end.getTime() - start.getTime() > 31536000000)
@@ -143,12 +164,12 @@ const Home = () => {
             let closest = null
             for (let i = 0; i < phases.length; i++) {
                 let phase = phases[i]
-                let start = new Date(phase.start_time)
+                let start = new Date(phase.startTime)
 
                 if (closest === null)
                     closest = phase
                 else {
-                    let closestStart = new Date(closest.start_time)
+                    let closestStart = new Date(closest.startTime)
                     if (start < closestStart) closest = phase
                 }
             }
@@ -158,8 +179,8 @@ const Home = () => {
 
         //order phases by start date
         phases.sort((a: any, b: any) => {
-            let aStart = new Date(a.start_time)
-            let bStart = new Date(b.start_time)
+            let aStart = new Date(a.startTime)
+            let bStart = new Date(b.startTime)
 
             if (aStart < bStart) {
                 return -1
@@ -170,12 +191,19 @@ const Home = () => {
             }
         })
 
-        if (phaseTimer.name !== currentPhase.name) {
+
+
+        // im getting error
+        //  if (phaseTimer.name !== currentPhase.name) {
+        if (phaseTimer && currentPhase && phaseTimer.name !== currentPhase.name){
             if (phaseTimer.timeout) clearTimeout(phaseTimer.timeout)
 
             const now = new Date()
-            const start = new Date(currentPhase.start_time)
-            const end = new Date(currentPhase.end_time)
+            const start = new Date(currentPhase.startTime)
+            const end = new Date(currentPhase.endTime)
+
+            console.log(start, end);
+            
 
             phaseTimer.name = currentPhase.name
 
@@ -185,7 +213,7 @@ const Home = () => {
                         refresh()
                         phaseTimer.timeout = null
                         phaseTimer.name = null
-                    }, new Date(currentPhase.end_time).getTime() - new Date().getTime())
+                    }, new Date(currentPhase.endTime).getTime() - new Date().getTime())
                 } else {
                     currentPhase.noend = true
                 }
@@ -195,10 +223,23 @@ const Home = () => {
                     refresh()
                     phaseTimer.timeout = null
                     phaseTimer.name = null
-                }, new Date(currentPhase.start_time).getTime() - new Date().getTime())
+                }, new Date(currentPhase.startTime).getTime() - new Date().getTime())
             } else if (now > end) {
-                //past phase
+                // Identify the next phase based on the current phase's end time
+                const nextPhaseIndex = phases.findIndex(p => new Date(p.startTime) > end);
+                if (nextPhaseIndex !== -1) {
+                    // There is a next phase. Transition to this phase.
+                    const nextPhase = phases[nextPhaseIndex];
+                    managePhases([nextPhase]); // Or any other logic to initiate the next phase
+                    console.log(`Transitioning to next phase: ${nextPhase.name}`);
+                } else {
+                    // No more phases. Handle the end of all phases.
+                    console.log("All phases have concluded.");
+                    // Implement logic for when all phases are finished, such as resetting the system, notifying users, etc.
+                    // handleEndOfAllPhases(); This is a placeholder for whatever logic you need to implement.
+                }
             }
+            
         }
 
         setPhases(phases)
@@ -206,6 +247,9 @@ const Home = () => {
             manageWhitelist(currentPhase)
             setCurrentPhase(currentPhase)
         }
+        console.log(`this is ${currentPhase.unitPrice}`);
+
+        
     }
 
     const manageWhitelist = (currentPhase: any) => {
@@ -226,7 +270,7 @@ const Home = () => {
     }
 
     const switchPhase = (phase: any) => {
-        if (!phase.noend && (new Date(phase.end_time) < new Date() || phase.name === currentPhase.name))
+        if (!phase.noend && (new Date(phase.endTime) < new Date() || phase.name === currentPhase.name))
             return;
 
         setCurrentPhase(phase)
@@ -275,13 +319,13 @@ const Home = () => {
         }
 
         //check if current phase is active
-        if (new Date(currentPhase.start_time) > new Date()) {
+        if (new Date(currentPhase.startTime) > new Date()) {
             toast.error("This phase has not started yet")
             return
         }
 
         //check if current phase has ended
-        if (!currentPhase.noend && new Date(currentPhase.end_time) < new Date()) {
+        if (!currentPhase.noend && new Date(currentPhase.endTime) < new Date()) {
             toast.error("This phase has ended")
             return
         }
@@ -291,10 +335,10 @@ const Home = () => {
             gasPrice: GasPrice.fromString("0.01usei")
         })
 
-        let lighthouseConfig = await client.queryContractSmart(LIGHTHOUSE_CONTRACT, { get_config: {} })
+        let lighthouseConfig = await client.queryContractSmart(CONTRACT_ADDRESS, { get_config: {} })
 
         //check if wallet have enough balance
-        if (currentPhase.unit_price > 0 && new BigNumber(currentPhase.unit_price).div(1e6).plus((new BigNumber(lighthouseConfig.fee).div(1e6))).times(amount).gt(new BigNumber(balance))) {
+        if (currentPhase.unitPrice > 0 && new BigNumber(currentPhase.unitPrice).div(1e6).plus((new BigNumber(lighthouseConfig.fee).div(1e6))).times(amount).gt(new BigNumber(balance))) {
             toast.error("Insufficient balance")
             return
         }
@@ -310,7 +354,7 @@ const Home = () => {
         }
 
         const instruction: any = {
-            contractAddress: LIGHTHOUSE_CONTRACT,
+            contractAddress: CONTRACT_ADDRESS,
             msg: {
                 mint_native: {
                     collection: config.collection_address,
@@ -322,7 +366,7 @@ const Home = () => {
             },
             funds: [{
                 denom: 'usei',
-                amount: new BigNumber(currentPhase.unit_price).plus(new BigNumber(lighthouseConfig.fee)).toString()
+                amount: new BigNumber(currentPhase.unitPrice).plus(new BigNumber(lighthouseConfig.fee)).toString()
             }]
         }
 
@@ -433,22 +477,22 @@ const Home = () => {
 
             <C.Container>
                 
-                <C.Header>
-                    <C.Logo src="/images/logo.png" />
-                    {wallet === null && (
-                        <C.WalletConnect onClick={openWalletConnect}>Connect Wallet</C.WalletConnect>
-                    )}
-                    {wallet !== null && (
-                        <Wallet
-                            balance={balance + " SEI"}
-                            address={wallet!.accounts[0].address}
-                        >
-                            <DropdownItem onClick={() => navigator.clipboard.writeText(wallet!.accounts[0].address)}>Copy Address</DropdownItem>
-                            <DropdownItem onClick={() => { disconnectWallet(); openWalletConnect() }}>Change Wallet</DropdownItem>
-                            <DropdownItem onClick={disconnectWallet}>Disconnect</DropdownItem>
-                        </Wallet>
-                    )}
-                </C.Header>
+                    {/* <C.Header>
+                        <C.Logo src="/images/logo.png" />
+                        {wallet === null && (
+                            <C.WalletConnect onClick={openWalletConnect}>Connect Wallet</C.WalletConnect>
+                        )}
+                        {wallet !== null && (
+                            <Wallet
+                                balance={balance + " SEI"}
+                                address={wallet!.accounts[0].address}
+                            >
+                                <DropdownItem onClick={() => navigator.clipboard.writeText(wallet!.accounts[0].address)}>Copy Address</DropdownItem>
+                                <DropdownItem onClick={() => { disconnectWallet(); openWalletConnect() }}>Change Wallet</DropdownItem>
+                                <DropdownItem onClick={disconnectWallet}>Disconnect</DropdownItem>
+                            </Wallet>
+                        )}
+                    </C.Header> */}
                 {/* <C.banner>
                 <img src="/images/bg.jpg" alt="bg" />
                 </C.banner> */}
@@ -495,28 +539,28 @@ const Home = () => {
                                           </C.about>
                                         <C.Phases>
                                             {phases.map((phase, index) => (
-                                                <C.Phase key={index} active={currentPhase.name === phase.name ? "true" : "false"} switch={!(!phase.noend && new Date(phase.end_time) < new Date()) ? "true" : "false"} onClick={() => switchPhase(phase)}>
+                                                <C.Phase key={index} active={currentPhase.name === phase.name ? "true" : "false"} switch={!(!phase.noend && new Date(phase.endTime) < new Date()) ? "true" : "false"} onClick={() => switchPhase(phase)}>
                                                     <C.PhaseTop>
                                                         <C.PhaseTitle>{phase.name}</C.PhaseTitle>
                                                         {!phase.noend && (
                                                             <>
-                                                                {new Date(phase.start_time) < new Date() && new Date(phase.end_time) > new Date() && (
+                                                                {new Date(phase.startTime) < new Date() && new Date(phase.endTime) > new Date() && (
                                                                     <C.PhaseDate>
-                                                                        <span>Ends In</span> <Timer date={phase.end_time} />
+                                                                        <span>Ends In</span> <Timer date={phase.endTime} />
                                                                     </C.PhaseDate>
                                                                 )}
                                                             </>
                                                         )}
-                                                        {new Date(phase.start_time) > new Date() && (
+                                                        {new Date(phase.startTime) > new Date() && (
                                                             <C.PhaseDate>
-                                                                <span>Starts In</span> <Timer date={phase.start_time} />
+                                                                <span>Starts In</span> <Timer date={phase.startTime} />
                                                             </C.PhaseDate>
                                                         )}
                                                     </C.PhaseTop>
                                                     <C.PhaseBottom>
-                                                        {phase.max_tokens > 0 ? phase.max_tokens + ' Per Wallet •' : ''} {new BigNumber(phase.unit_price).div(1e6).toString()} SEI
+                                                        {phase.max_tokens > 0 ? phase.max_tokens + ' Per Wallet •' : ''} {new BigNumber(phase.unitPrice).div(1e6).toString()} SEI
                                                     </C.PhaseBottom>
-                                                    {(!phase.noend && new Date(phase.end_time) < new Date()) && (
+                                                    {(!phase.noend && new Date(phase.endTime) < new Date()) && (
                                                         <C.PhaseBadge>
                                                             Ended
                                                         </C.PhaseBadge>
@@ -535,7 +579,7 @@ const Home = () => {
                                         </C.Image>
                                         <C.MintInfo>
                                             <C.Price>
-                                                Price: <span>{new BigNumber(currentPhase.unit_price).div(1e6).times(amount).toString()} SEI</span>
+                                                Price: <span>{new BigNumber(currentPhase.unitPrice).div(1e6).times(amount).toString()} SEI</span>
                                             </C.Price>
                                             <C.Amount>
                                                 <C.AmountButton onClick={decrementAmount}>
@@ -559,7 +603,7 @@ const Home = () => {
                                         <C.TotalMinted>
                                             <C.TotalMintedInfo>
                                                 <C.TotalMintedTitle>TOTAL TICKET SOLD</C.TotalMintedTitle>
-                                                <C.TotalMintedValue>{Math.floor((collection.mintedSupply / 3000 * 100) * 100) / 100}% <span>{collection.mintedSupply}/{2000}</span></C.TotalMintedValue>
+                                                <C.TotalMintedValue>{Math.floor((collection.mintedSupply / 3000 * 100) * 100) / 100}% <span>{collection.mintedSupply}/{collection.supply}</span></C.TotalMintedValue>
                                             </C.TotalMintedInfo>
                                             <C.TotalMintedProgress value={Math.floor((collection.mintedSupply / 3000 * 100) * 100) / 100}></C.TotalMintedProgress>
                                         </C.TotalMinted>

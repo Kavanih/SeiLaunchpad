@@ -6,6 +6,7 @@ import { WalletConnectProvider } from "hooks/walletConnect"
 import { Toaster } from "react-hot-toast";
 import { color } from "styles/theme";
 import { Hex2Rgba } from "utils/helpers";
+import NavBar from "navBar/navBar"
 
 const App = () => {
 
@@ -16,6 +17,7 @@ const App = () => {
     return (
         <WalletConnectProvider
         >
+            <NavBar/>
             {/* <Start/> */}
             <Home />
             <Toaster
